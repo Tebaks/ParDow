@@ -11,43 +11,39 @@ import (
 	"sync"
 )
 
-var wg sync.WaitGroup
-
 type info struct {
-	url       string
-	totalSize int64
-	file      *os.File
+	url      string
+	fileSize int64
+	file     *os.File
 }
+
+var wg sync.WaitGroup
 
 // ParallelDownload is Downloading a single file with multiple goroutines in same time.
 func ParallelDownload(url string, goroutineCount int64, path string, saveName string) {
-	fileSize, err := getFileSize(url)
+	var info = info{}
+	info.url = url
+	fileSize, err := info.getFileSize()
 	if err != nil {
-		log.Println(err)
-		os.Exit(1)
+		log.Fatalf("Error occur when getting file size: %s", err)
 	}
 	log.Printf("File Size : %d ", fileSize)
+	info.fileSize = fileSize
 	localPath := "./" + saveName + filepath.Ext(url)
-	f, err := os.OpenFile(localPath, os.O_CREATE|os.O_RDWR, 0600)
+	file, err := os.OpenFile(localPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		log.Println(err)
-		os.Exit(1)
+		log.Fatalf("Error occur when open file: %s", err)
 	}
-	defer f.Close()
-
-	var info = info{
-		url:       url,
-		totalSize: fileSize,
-		file:      f,
-	}
+	defer file.Close()
+	info.file = file
 
 	var start, end int64
 
-	var partSize = int64(fileSize / goroutineCount)
+	var partSize = int64(info.fileSize / goroutineCount)
 	fmt.Println("Downloading...")
 	for num := int64(0); num < goroutineCount; num++ {
 		if num == goroutineCount {
-			end = fileSize
+			end = info.fileSize
 		} else {
 			end = start + partSize
 		}
@@ -75,7 +71,6 @@ func (i *info) partialDownload(number, start, end int64) {
 		if read > 0 {
 			write, writeErr := i.file.WriteAt(buffer[0:read], start)
 			if writeErr != nil {
-				log.Println(read)
 				log.Fatalf("Error occurs when writing: %s", writeErr)
 			}
 			if read != write {
@@ -85,7 +80,6 @@ func (i *info) partialDownload(number, start, end int64) {
 			start = int64(write) + start
 			if write > 0 {
 				completed += int64(write)
-				fmt.Printf("%d downloaded by %d \n", completed, number)
 			}
 		}
 		if readErr != nil {
@@ -105,22 +99,20 @@ func (i *info) getBody(start, end int64) (io.ReadCloser, int64, error) {
 	var client http.Client
 	req, err := http.NewRequest("GET", i.url, nil)
 	if err != nil {
-		log.Println(err)
-		os.Exit(1)
+		log.Fatalf("Error occur when GET request: %s", err)
 	}
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 	res, err := client.Do(req)
 	if err != nil {
-		log.Println(err)
-		os.Exit(1)
+		log.Fatalf("Error occur when getting response: %s", err)
 	}
 	size, err := strconv.ParseInt(res.Header["Content-Length"][0], 10, 64)
 	return res.Body, size, err
 }
 
-func getFileSize(url string) (size int64, err error) {
+func (i *info) getFileSize() (size int64, err error) {
 	client := http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", i.url, nil)
 	if err != nil {
 		return 0, err
 	}
